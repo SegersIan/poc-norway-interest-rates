@@ -1,0 +1,25 @@
+{
+  "name": "poc-norway-interest-rates",
+  "version": "1.0.0",
+  "description": "Project meant to fetch and analyze `Norges Bank` interest rate decisions over a long period.",
+  "homepage": "https://github.com/SegersIan/poc-norway-interest-rates#readme",
+  "bugs": {
+    "url": "https://github.com/SegersIan/poc-norway-interest-rates/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SegersIan/poc-norway-interest-rates.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "\tmodule",
+  "main": "index.js",
+  "scripts": {
+    "clean": "rm -rf temp/*",
+    "1": "rm -rf temp/step-1/* && node scripts/1-scan-for-available-reports.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "puppeteer": "^24.32.0"
+  }
+}
