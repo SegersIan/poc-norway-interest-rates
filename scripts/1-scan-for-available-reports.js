@@ -76,26 +76,60 @@ async function fetchContentFromUrl(url) {
   const $ = load(html);
   
   // Remove unwanted elements that shouldn't be in the content
-  $('script, style, nav, header, footer, .navigation, .footer, .header, .sidebar, .menu, .breadcrumb, .skip-link').remove();
+  $('script, style, nav, header, footer, .navigation, .footer, .header, .sidebar, .menu, .breadcrumb, .skip-link, .social-share, .print-button, .back-button').remove();
   
-  // Try to find main content area
+  // Try to find main content area - prioritize more specific selectors
   let content = '';
-  const $mainContent = $('main, article, .content, .main-content, #content, .article-content, .post-content, .entry-content');
+  const contentSelectors = [
+    'article .content',
+    'article main',
+    'main article',
+    'article',
+    'main',
+    '.article-content',
+    '.post-content',
+    '.entry-content',
+    '.content',
+    '.main-content',
+    '#content'
+  ];
   
-  if ($mainContent.length > 0) {
-    // Extract text from main content area
-    $mainContent.each((i, elem) => {
-      const text = $(elem).text();
-      if (text) {
-        content += text + '\n';
-      }
-    });
+  let $mainContent = null;
+  for (const selector of contentSelectors) {
+    $mainContent = $(selector).first();
+    if ($mainContent.length > 0) {
+      break;
+    }
+  }
+  
+  if ($mainContent && $mainContent.length > 0) {
+    // Extract text from the first (most specific) main content area only
+    content = $mainContent.text();
   } else {
-    // Fallback: extract from body, but clean it up
+    // Fallback: extract from body, but be more selective
     const $body = $('body');
     // Remove navigation and footer elements
-    $body.find('nav, footer, header, .navigation, .footer, .header, .sidebar, .menu, .breadcrumb').remove();
-    content = $body.text();
+    $body.find('nav, footer, header, .navigation, .footer, .header, .sidebar, .menu, .breadcrumb, .social-share, .print-button').remove();
+    
+    // Try to find the largest content block (likely the main article)
+    let largestContent = '';
+    let largestSize = 0;
+    
+    $body.find('div, section, article').each((i, elem) => {
+      const $elem = $(elem);
+      const text = $elem.text().trim();
+      // Skip if it's too short (likely navigation or small elements)
+      if (text.length > 100 && text.length > largestSize) {
+        // Check if it contains substantial content (not just navigation)
+        const hasSubstantialContent = text.split(/\s+/).length > 50;
+        if (hasSubstantialContent) {
+          largestContent = text;
+          largestSize = text.length;
+        }
+      }
+    });
+    
+    content = largestContent || $body.text();
   }
   
   // Clean up the content thoroughly
@@ -120,6 +154,40 @@ async function fetchContentFromUrl(url) {
     .filter(line => line.length > 0) // Remove empty lines
     .join('\n')
     .trim();
+  
+  // Deduplicate: remove repeated paragraphs/sections
+  const lines = content.split('\n');
+  const seen = new Set();
+  const uniqueLines = [];
+  
+  for (const line of lines) {
+    // Normalize line for comparison (lowercase, remove extra spaces)
+    const normalized = line.toLowerCase().replace(/\s+/g, ' ').trim();
+    
+    // Skip if we've seen this exact line before (and it's substantial)
+    if (normalized.length > 20 && seen.has(normalized)) {
+      continue;
+    }
+    
+    // Skip if this line is a duplicate of a recent line (within last 5 lines)
+    let isRecentDuplicate = false;
+    if (normalized.length > 20) {
+      for (let i = Math.max(0, uniqueLines.length - 5); i < uniqueLines.length; i++) {
+        const recentNormalized = uniqueLines[i].toLowerCase().replace(/\s+/g, ' ').trim();
+        if (normalized === recentNormalized && normalized.length > 20) {
+          isRecentDuplicate = true;
+          break;
+        }
+      }
+    }
+    
+    if (!isRecentDuplicate) {
+      seen.add(normalized);
+      uniqueLines.push(line);
+    }
+  }
+  
+  content = uniqueLines.join('\n').trim();
   
   return content || null;
 }
