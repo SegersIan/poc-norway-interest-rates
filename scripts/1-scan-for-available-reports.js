@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { load } from 'cheerio';
+import puppeteer from 'puppeteer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,6 +61,50 @@ async function fetchHTML(url) {
   } catch (error) {
     // Note: console.error is used here as it's an error, not regular logging
     console.error(`Error fetching ${url}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Fetches HTML content from a URL using Puppeteer (with JavaScript execution)
+ * Use this for pages that load content dynamically via JavaScript
+ */
+async function fetchHTMLWithBrowser(url, waitForSelector = null, timeout = 10000) {
+  let browser = null;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+
+    // Set a reasonable viewport
+    await page.setViewport({ width: 1280, height: 800 });
+
+    // Navigate to the page
+    await page.goto(url, {
+      waitUntil: 'networkidle2',
+      timeout: timeout
+    });
+
+    // If a selector is provided, wait for it to appear
+    if (waitForSelector) {
+      await page.waitForSelector(waitForSelector, { timeout: timeout });
+    } else {
+      // Otherwise, just wait a bit for content to load
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    // Get the rendered HTML
+    const html = await page.content();
+
+    await browser.close();
+    return html;
+  } catch (error) {
+    console.error(`Error fetching with browser ${url}:`, error.message);
+    if (browser) {
+      await browser.close();
+    }
     return null;
   }
 }
@@ -303,7 +348,7 @@ export function extractDate(text, href, defaultYear) {
   if (!text && !href) return null;
 
   const searchText = (text || href || '').toLowerCase();
-  
+
   // Norwegian month names
   const months = {
     'januar': 1, 'februar': 2, 'mars': 3, 'april': 4, 'mai': 5, 'juni': 6,
@@ -366,6 +411,130 @@ export function extractDate(text, href, defaultYear) {
   return null;
 }
 
+/**
+ * Parses the news list page for years 2007 onwards
+ * Structure: Links with text "Rentebeslutning <month> <year>"
+ */
+export function parseNewsListPage(html, year) {
+  const $ = load(html);
+  const decisions = [];
+  const baseUrl = 'https://www.norges-bank.no';
+
+  // Norwegian month names mapping
+  const norwegianMonths = {
+    'januar': 1, 'februar': 2, 'mars': 3, 'april': 4, 'mai': 5, 'juni': 6,
+    'juli': 7, 'august': 8, 'september': 9, 'oktober': 10, 'november': 11, 'desember': 12
+  };
+
+  // Find all links that contain "Rentebeslutning" or "Rentemote"
+  $('a').each((i, elem) => {
+    const $elem = $(elem);
+    const linkText = $elem.text().trim();
+    const href = $elem.attr('href');
+
+    // Check if the link text contains "Rentebeslutning", "Rentemote", or "Rentemøte"
+    if (linkText.toLowerCase().includes('rentebeslutning') ||
+        linkText.toLowerCase().includes('rentemote') ||
+        linkText.toLowerCase().includes('rentemøte')) {
+
+      if (!href) return;
+
+      const fullUrl = href.startsWith('http')
+        ? href
+        : new URL(href, baseUrl).href;
+
+      // Try to extract date from link text or href
+      // Format 1: "Rentebeslutning desember 2024" (month and year only)
+      // Format 2: URL like "/tema/pengepolitikk/Rentemoter/2024/desember-2024/"
+
+      let dateMatch = extractDate(linkText, href, year);
+
+      // If no date found with day, try to extract month and year, use first day of month
+      if (!dateMatch) {
+        for (const [monthName, monthNum] of Object.entries(norwegianMonths)) {
+          if (linkText.toLowerCase().includes(monthName)) {
+            // Default to the 1st of the month if no specific date is found
+            dateMatch = {
+              year: year,
+              month: monthNum,
+              date: 1
+            };
+            break;
+          }
+        }
+      }
+
+      if (dateMatch) {
+        // Check if we already have this decision
+        const existingDecision = decisions.find(d =>
+          d.year === dateMatch.year &&
+          d.month === dateMatch.month.toString().padStart(2, '0') &&
+          d.date === dateMatch.date.toString().padStart(2, '0')
+        );
+
+        if (!existingDecision) {
+          decisions.push({
+            year: dateMatch.year,
+            month: dateMatch.month.toString().padStart(2, '0'),
+            date: dateMatch.date.toString().padStart(2, '0'),
+            meetingPageUrl: fullUrl,
+            links: [] // Will be populated when we fetch the meeting page
+          });
+        }
+      }
+    }
+  });
+
+  return decisions;
+}
+
+/**
+ * Parses a meeting page to extract all resources (Pressemelding, Innledning, etc.)
+ * Returns an array of links with text and URL
+ */
+export async function parseMeetingPage(url, year, useBrowser = false) {
+  const html = useBrowser
+    ? await fetchHTMLWithBrowser(url)
+    : await fetchHTML(url);
+
+  if (!html) {
+    return [];
+  }
+
+  const $ = load(html);
+  const links = [];
+  const baseUrl = 'https://www.norges-bank.no';
+
+  // Look for common resource links
+  $('a').each((i, elem) => {
+    const $elem = $(elem);
+    const linkText = $elem.text().trim();
+    const href = $elem.attr('href');
+
+    // Collect relevant resource links
+    if (href && (
+      linkText.toLowerCase().includes('pressemelding') ||
+      linkText.toLowerCase().includes('innledning') ||
+      linkText.toLowerCase().includes('press release') ||
+      linkText.toLowerCase().includes('bakgrunn')
+    )) {
+      const fullUrl = href.startsWith('http')
+        ? href
+        : new URL(href, baseUrl).href;
+
+      // Avoid duplicates
+      if (!links.some(l => l.url === fullUrl)) {
+        links.push({
+          text: linkText,
+          url: fullUrl
+        });
+      }
+    }
+  });
+
+  return links;
+}
+
 
 /**
  * Creates a markdown file from template
@@ -400,8 +569,12 @@ export function createMarkdownFile(year, month, date, links, contents, fetchTime
  * Main function to process all years
  */
 async function main() {
-  const years = [1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006];
-  //const years = [1999];
+  // Generate years from 1999 to 2025
+  const currentYear = new Date().getFullYear();
+  const endYear = Math.max(currentYear, 2025);
+  const years = Array.from({ length: endYear - 1999 + 1 }, (_, i) => 1999 + i);
+
+  //const years = [2024]; // For testing
   const fetchTime = new Date().toISOString();
 
   log(null, 'Starting to fetch Rentebeslutninger...\n');
@@ -409,21 +582,51 @@ async function main() {
   try {
     for (const year of years) {
       log(year, `Processing year ${year}...`);
-      
-      const yearUrl = `https://www.norges-bank.no/tema/pengepolitikk/Rentemoter/${year}-Rentemoter/`;
-      const html = await fetchHTML(yearUrl);
-      
-      if (!html) {
-        log(year, `  ⚠️  Could not fetch page for year ${year}`);
-        continue;
+
+      // Different URL formats for different year ranges
+      let decisions = [];
+
+      if (year <= 2006) {
+        // Old format: dedicated year page
+        const yearUrl = `https://www.norges-bank.no/tema/pengepolitikk/Rentemoter/${year}-Rentemoter/`;
+        const html = await fetchHTML(yearUrl);
+
+        if (!html) {
+          log(year, `  ⚠️  Could not fetch page for year ${year}`);
+          continue;
+        }
+
+        decisions = parseYearPage(html, year);
+      } else {
+        // New format: news list page (2007 onwards)
+        // These pages load content via JavaScript, so we need to use Puppeteer
+        const yearUrl = `https://www.norges-bank.no/tema/pengepolitikk/Rentemoter/?tab=newslist&year=${year}`;
+        log(year, `  Fetching with browser (JavaScript-rendered page)...`);
+        const html = await fetchHTMLWithBrowser(yearUrl, 'a', 15000);
+
+        if (!html) {
+          log(year, `  ⚠️  Could not fetch page for year ${year}`);
+          continue;
+        }
+
+        decisions = parseNewsListPage(html, year);
+
+        // For 2007+, the content is embedded directly on the meeting page
+        // So we'll add the meeting page URL itself as the resource link
+        log(year, `  Found ${decisions.length} meeting(s) for year ${year}`);
+        for (const decision of decisions) {
+          decision.links = [{
+            text: 'Rentebeslutning',
+            url: decision.meetingPageUrl
+          }];
+        }
       }
 
-      const decisions = parseYearPage(html, year);
       log(year, `  Found ${decisions.length} decision(s) for year ${year}`);
 
       for (const decision of decisions) {
         const dirPath = path.join(dataDir, decision.year.toString(), decision.month, decision.date);
-        
+
         // Create directory if it doesn't exist
         if (!fs.existsSync(dirPath)) {
           fs.mkdirSync(dirPath, { recursive: true });
@@ -432,14 +635,14 @@ async function main() {
         // Fetch content from each URL
         const contents = [];
         const links = decision.links || [];
-        
+
         log(year, `    Fetching content for ${decision.year}-${decision.month}-${decision.date}...`);
         for (let i = 0; i < links.length; i++) {
           const link = links[i];
           log(year, `      Fetching: ${link.url}`);
           const content = await fetchContentFromUrl(link.url);
           contents.push(content);
-          
+
           // Add a small delay between requests to be respectful
           if (i < links.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -462,7 +665,7 @@ async function main() {
       }
 
       log(year, `  ✓ Completed year ${year}\n`);
-      
+
       // Add a delay between years
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
