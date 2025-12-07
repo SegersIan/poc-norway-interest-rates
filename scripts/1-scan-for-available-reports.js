@@ -400,8 +400,8 @@ export function createMarkdownFile(year, month, date, links, contents, fetchTime
  * Main function to process all years
  */
 async function main() {
-   // const years = [1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006];
-  const years = [1999];
+  const years = [1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006];
+  //const years = [1999];
   const fetchTime = new Date().toISOString();
 
   log(null, 'Starting to fetch Rentebeslutninger...\n');
