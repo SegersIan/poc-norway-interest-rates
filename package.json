@@ -16,7 +16,9 @@
   "main": "index.js",
   "scripts": {
     "clean": "rm -rf temp/*",
-    "1": "rm -rf temp/step-1/* && node scripts/1-scan-for-available-reports.js"
+    "1": "rm -rf temp/step-1/* && node scripts/1-scan-for-available-reports.js",
+    "test": "node --test tests/*.test.js",
+    "test:watch": "node --test --watch tests/*.test.js"
   },
   "dependencies": {
     "cheerio": "^1.1.2",

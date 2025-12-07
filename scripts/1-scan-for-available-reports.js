@@ -67,7 +67,7 @@ async function fetchHTML(url) {
 /**
  * Fetches and extracts text content from a URL
  */
-async function fetchContentFromUrl(url) {
+export async function fetchContentFromUrl(url) {
   const html = await fetchHTML(url);
   if (!html) {
     return null;
@@ -196,7 +196,7 @@ async function fetchContentFromUrl(url) {
  * Extracts decision dates and their links from a year page
  * Structure: Date headings (e.g., "22. desember") followed by links (Pressemelding, Innledning til pressekonferanse)
  */
-function parseYearPage(html, year) {
+export function parseYearPage(html, year) {
   const $ = load(html);
   const decisions = [];
   const baseUrl = `https://www.norges-bank.no/tema/pengepolitikk/Rentemoter/${year}-Rentemoter/`;
@@ -299,7 +299,7 @@ function parseYearPage(html, year) {
  * Extracts date from text or URL
  * Handles Norwegian date formats like "22. desember 1999", "22 desember 1999", "22/12/1999", etc.
  */
-function extractDate(text, href, defaultYear) {
+export function extractDate(text, href, defaultYear) {
   if (!text && !href) return null;
 
   const searchText = (text || href || '').toLowerCase();
@@ -370,7 +370,7 @@ function extractDate(text, href, defaultYear) {
 /**
  * Creates a markdown file from template
  */
-function createMarkdownFile(year, month, date, links, contents, fetchTime) {
+export function createMarkdownFile(year, month, date, links, contents, fetchTime) {
   const title = `# Rentebeslutninger ${year}-${month}-${date}`;
   const fetchInfo = `* Information Fetched : ${fetchTime}`;
   
@@ -474,10 +474,17 @@ async function main() {
   }
 }
 
-// Run the script
-main().catch((error) => {
-  console.error('Fatal error:', error);
-  closeLogWriters();
-  process.exit(1);
-});
+// Run the script if executed directly (not imported)
+// Check if this file is being run directly
+const isMainModule = process.argv[1] && 
+  (process.argv[1].endsWith('1-scan-for-available-reports.js') ||
+   process.argv[1].includes('1-scan-for-available-reports'));
+
+if (isMainModule) {
+  main().catch((error) => {
+    console.error('Fatal error:', error);
+    closeLogWriters();
+    process.exit(1);
+  });
+}
 
